@@ -2,26 +2,28 @@ module Oscillators
 
 abstract type AbstractOscillator end
 
-samplerate = 48000
-
-struct SineOscillator <: AbstractOscillator
-    previous::Float64
-    sample::Float64
-    cosine::Float64
-
-    function SineOscillator(frequency)
-        if frequency > samplerate / 2
-            error("unstable oscillation")
-        end
-
-        sample = 2 * pi * frequency / samplerate #sin
-        cosine = 1 - sample^2 / 2 #cos
-
-        return new(0, sample, cosine)
-    end
+struct SineOscillator{T<:AbstractFloat} <: AbstractOscillator
+    previous::T
+    sample::T
+    cosine::T
 end
 
-function oscilate(osc::SineOscillator)
+samplerate = 48000
+
+function SineOscillator(frequency)
+   
+    if frequency >= samplerate / 2 #TODO:  this is not the correct formula
+        error("unstable oscillation. $(frequency) Hz is to high for $(samplerate) Hz sample rate")
+    end
+
+    step = 2 * pi * frequency / samplerate
+    sample = sin(step) # step - step^3/factorial(3) + step^5/factorial(5)
+    cosine = cos(step) #1 - step^2/(factorial(2)) + step^4/factorial(4)
+
+    return SineOscillator{typeof(step)}(0, sample, cosine)
+end
+
+function oscillate(osc::SineOscillator)
     nextsample = 2 * osc.sample * osc.cosine - osc.previous
     return SineOscillator(osc.sample, nextsample, osc.cosine)
 end
@@ -30,35 +32,44 @@ function sample(osc::SineOscillator)
     return osc.sample
 end
 
-# struct CompositeOscillator
-#     oscillators::Vector{AbstractOscillator}
-# end
+struct FastSpectralOscillator <: AbstractOscillator
+    P::Vector{Float64}
+    S::Vector{Float64}
+    C::Vector{Float64}
+end
 
-# function oscilate(osc::CompositeOscillator)
-#     return CompositeOscillator(oscilate.(osc.oscillators))
-# end
+function FastSpectralOscillator(spectrum::Vector{Float64})
 
-# function sample(osc::CompositeOscillator)
-#     return sum(sample.(osc.oscillators)) / length(osc.oscillators)
-# end
+    steps = 2 .* pi .* spectrum ./ samplerate
+    S = sin.(steps) # step - step^3/factorial(3) + step^5/factorial(5)
+    C = cos.(steps) #1 - step^2/(factorial(2)) + step^4/factorial(4)
 
-# struct QuadratureOscilator <: AbstractOscilator
-#     step::ComplexF64
-#     amplitude::Complex{Float64}
+    return SpectralOscillator(zeros(length(spectrum)), S, C)
+end
 
-#     function QuadratureOscilator(frequency, amplitude)
-#         dx = 2 * pi * frequency / 48000.0
-#         step = (1 - dx^2) + dx * im
-#         return new(step, amplitude)
-#     end
-# end
+function oscillate(osc::FastSpectralOscillator)
+    nextsample = 2 .* osc.S .* osc.C .- osc.P
+    return FastSpectralOscillator(osc.S, nextsample, osc.C)
+end
 
-# function oscilate(osc::QuadratureOscilator)
-#     return QuadratureOscilator(osc.step, osc.amplitude * osc.step)
-# end
+function sample(osc::FastSpectralOscillator)
+    return sum(osc.S)
+end
 
-# function sample(osc::QuadratureOscilator)
-#     return imag(osc.amplitude)
-# end
+struct SpectralOscillator{T} <: AbstractOscillator where {T<:AbstractFloat}
+    sines::Vector{SineOscillator{T}}
+end
+
+function SpectralOscillator(spectrum::Vector)
+    return SpectralOscillator(SineOscillator.(spectrum))
+end
+
+function oscillate(osc::SpectralOscillator)
+    return oscillate.(osc.sines)
+end
+
+function sample(osc::SpectralOscillator)
+    return sum(sample.(osc))
+end
 
 end
