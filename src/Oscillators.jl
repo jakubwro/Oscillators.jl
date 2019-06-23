@@ -1,75 +1,58 @@
 module Oscillators
 
+using Unitful
+import Unitful: Frequency, Hz, kHz, 𝐓, s
+
+samplerate = 48000Hz
+
 abstract type AbstractOscillator end
 
-struct SineOscillator{T<:AbstractFloat} <: AbstractOscillator
+function maxstable(samplerate::Frequency)
+    return samplerate / 2 #TODO: this is not the correct formula
+end
+
+function checkstability(frequency::Frequency, samplerate::Frequency)
+    if frequency >= maxstable(samplerate)
+        error("Oscillator is unstable: $(frequency) is to high for $(samplerate) sample rate. The maximum stable frequency is $(maxstable(samplerate))")
+    end
+end
+
+mutable struct SineOscillator{T<:AbstractFloat} <: AbstractOscillator
     previous::T
     sample::T
     cosine::T
 end
 
-samplerate = 48000
+function SineOscillator(frequency::Frequency{T}, amplitude::Complex{T}) where {T<:AbstractFloat}
+    checkstability(frequency, samplerate)
 
-function SineOscillator(frequency)
-   
-    if frequency >= samplerate / 2 #TODO:  this is not the correct formula
-        error("unstable oscillation. $(frequency) Hz is to high for $(samplerate) Hz sample rate")
-    end
+    magnitude = abs(amplitude)
+    phase = angle(amplitude)
 
     step = 2 * pi * frequency / samplerate
-    sample = sin(step) # step - step^3/factorial(3) + step^5/factorial(5)
-    cosine = cos(step) #1 - step^2/(factorial(2)) + step^4/factorial(4)
+    previous = magnitude * sin(phase)
+    sample = magnitude * sin(phase + step)
+    cosine = cos(step)
 
-    return SineOscillator{typeof(step)}(0, sample, cosine)
+    return SineOscillator{typeof(step)}(previous, sample, cosine)
 end
 
-function oscillate(osc::SineOscillator)
+function SineOscillator(frequency::Frequency{T}, amplitude::T) where {T<:AbstractFloat}
+    return SineOscillator(frequency, complex(amplitude))
+end
+
+function oscillate!(osc::SineOscillator{T}) where {T<:AbstractFloat}
     nextsample = 2 * osc.sample * osc.cosine - osc.previous
-    return SineOscillator(osc.sample, nextsample, osc.cosine)
+    osc.previous, osc.sample = osc.sample, nextsample
+    return nextsample
 end
 
-function sample(osc::SineOscillator)
-    return osc.sample
+struct VectorOscillator{T<:AbstractFloat}
+    oscs::Vector{SineOscillator{T}}
 end
 
-struct FastSpectralOscillator <: AbstractOscillator
-    P::Vector{Float64}
-    S::Vector{Float64}
-    C::Vector{Float64}
-end
-
-function FastSpectralOscillator(spectrum::Vector{Float64})
-
-    steps = 2 .* pi .* spectrum ./ samplerate
-    S = sin.(steps) # step - step^3/factorial(3) + step^5/factorial(5)
-    C = cos.(steps) #1 - step^2/(factorial(2)) + step^4/factorial(4)
-
-    return SpectralOscillator(zeros(length(spectrum)), S, C)
-end
-
-function oscillate(osc::FastSpectralOscillator)
-    nextsample = 2 .* osc.S .* osc.C .- osc.P
-    return FastSpectralOscillator(osc.S, nextsample, osc.C)
-end
-
-function sample(osc::FastSpectralOscillator)
-    return sum(osc.S)
-end
-
-struct SpectralOscillator{T} <: AbstractOscillator where {T<:AbstractFloat}
-    sines::Vector{SineOscillator{T}}
-end
-
-function SpectralOscillator(spectrum::Vector)
-    return SpectralOscillator(SineOscillator.(spectrum))
-end
-
-function oscillate(osc::SpectralOscillator)
-    return oscillate.(osc.sines)
-end
-
-function sample(osc::SpectralOscillator)
-    return sum(sample.(osc))
+function oscillate!(osc::VectorOscillator{T}) where {T<:AbstractFloat}
+    sum(oscillate!.(osc.oscs))
 end
 
 end
